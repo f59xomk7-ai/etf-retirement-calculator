@@ -227,15 +227,33 @@ function HoldingsView({ state, quotes, portfolio, isLoadingQuotes, updateState, 
 }
 
 function RetirementView({ state, portfolio, projections, updateRetirementInputs }) {
+  const baseProjection = projections.find((projection) => projection.key === "base") || projections[0];
   return h("section", { className: "content-grid retirement-grid" }, [
     h("div", { className: "panel", key: "inputs" }, [
       h("h2", null, "退休條件"),
       Field({ label: "目前年齡", value: state.retirementInputs.currentAge, onChange: (value) => updateRetirementInputs("currentAge", value) }),
       Field({ label: "目標退休年齡", value: state.retirementInputs.retirementAge, onChange: (value) => updateRetirementInputs("retirementAge", value) }),
       Field({
+        label: "每月投入到幾歲停止",
+        value: state.retirementInputs.contributionStopAge,
+        onChange: (value) => updateRetirementInputs("contributionStopAge", value),
+      }),
+      Field({
         label: "退休後每月支出",
         value: state.retirementInputs.monthlyRetirementExpense,
         onChange: (value) => updateRetirementInputs("monthlyRetirementExpense", value),
+      }),
+      Field({
+        label: "預估年報酬率",
+        value: state.retirementInputs.annualReturn,
+        step: "0.001",
+        onChange: (value) => updateRetirementInputs("annualReturn", value),
+      }),
+      Field({
+        label: "目標提領率",
+        value: state.retirementInputs.withdrawalRate,
+        step: "0.001",
+        onChange: (value) => updateRetirementInputs("withdrawalRate", value),
       }),
       Field({
         label: "年通膨率",
@@ -243,21 +261,90 @@ function RetirementView({ state, portfolio, projections, updateRetirementInputs 
         step: "0.001",
         onChange: (value) => updateRetirementInputs("inflationRate", value),
       }),
-      h("p", { className: "muted" }, `目前組合加權年化報酬假設：${pct.format(portfolio.weightedReturn)}`),
+      h("p", { className: "muted" }, `目前組合加權報酬參考：${pct.format(portfolio.weightedReturn)}；本頁使用你設定的年報酬率。`),
     ]),
     h("div", { className: "panel wide", key: "scenarios" }, [
       h("div", { className: "panel-header" }, [
-        h("div", null, [h("h2", null, "退休試算"), h("p", null, "退休前配息預設再投入；退休後才領出支應生活費。")]),
+        h("div", null, [h("h2", null, "退休資產曲線"), h("p", null, "曲線顯示退休後資產逐年下降，終點就是資產可能領完的年齡。")]),
       ]),
-      h("div", { className: "scenario-grid" }, projections.map((projection) => h("article", { className: "scenario-card", key: projection.key }, [
+      h(DrawdownChart, { projections, key: "chart" }),
+      h("div", { className: "scenario-grid compact", key: "cards" }, projections.map((projection) => h("article", { className: "scenario-card", key: projection.key }, [
         h("span", { className: "badge" }, projection.label),
-        h("strong", null, twd.format(projection.retirementPortfolioValue)),
-        h("p", null, `退休時每月支出約 ${twd.format(projection.monthlyExpenseAtRetirement)}`),
-        h("p", null, `提領率 ${Number.isFinite(projection.withdrawalRate) ? pct.format(projection.withdrawalRate) : "無法估算"}`),
-        h("p", null, `資產可撐到 ${projection.assetLastsUntilAge >= 119 ? "120 歲以上" : `${projection.assetLastsUntilAge.toFixed(1)} 歲`}`),
+        h("strong", null, projection.assetLastsUntilAge >= 119 ? "120 歲+" : `${projection.assetLastsUntilAge.toFixed(1)} 歲`),
+        h("p", null, `退休時資產 ${twd.format(projection.retirementPortfolioValue)}`),
+        h("p", null, `實際提領率 ${Number.isFinite(projection.withdrawalRate) ? pct.format(projection.withdrawalRate) : "無法估算"}`),
+        h("p", null, `目標提領月額 ${twd.format(projection.safeMonthlyWithdrawal)}`),
       ]))),
+      h("div", { className: "notice", key: "note" }, [
+        h("strong", null, "中性情境摘要"),
+        h("p", null, `退休時每月支出約 ${twd.format(baseProjection.monthlyExpenseAtRetirement)}，資產估計可支撐到 ${baseProjection.assetLastsUntilAge >= 119 ? "120 歲以上" : `${baseProjection.assetLastsUntilAge.toFixed(1)} 歲`}。`),
+      ]),
     ]),
   ]);
+}
+
+function DrawdownChart({ projections }) {
+  const width = 780;
+  const height = 310;
+  const pad = { top: 24, right: 28, bottom: 38, left: 78 };
+  const allPoints = projections.flatMap((projection) => projection.drawdownSeries || []);
+  const minAge = Math.min(...allPoints.map((point) => point.age));
+  const maxAge = Math.max(90, ...allPoints.map((point) => point.age));
+  const maxBalance = Math.max(1, ...allPoints.map((point) => point.balance));
+  const colors = { conservative: "#b94435", base: "#245c7a", optimistic: "#1f7a53" };
+
+  function x(age) {
+    return pad.left + ((age - minAge) / (maxAge - minAge)) * (width - pad.left - pad.right);
+  }
+
+  function y(balance) {
+    return pad.top + (1 - balance / maxBalance) * (height - pad.top - pad.bottom);
+  }
+
+  function path(points) {
+    return points.map((point, index) => `${index === 0 ? "M" : "L"} ${x(point.age).toFixed(1)} ${y(point.balance).toFixed(1)}`).join(" ");
+  }
+
+  const yTicks = [0, 0.25, 0.5, 0.75, 1].map((ratio) => ({ ratio, value: maxBalance * ratio }));
+  const xTicks = Array.from({ length: 5 }, (_, index) => minAge + ((maxAge - minAge) / 4) * index);
+
+  return h("div", { className: "chart-wrap" }, [
+    h("svg", { viewBox: `0 0 ${width} ${height}`, role: "img", "aria-label": "退休資產耗盡曲線", key: "svg" }, [
+      h("rect", { x: 0, y: 0, width, height, rx: 8, className: "chart-bg", key: "bg" }),
+      ...yTicks.map((tick) =>
+        h("g", { key: `y-${tick.ratio}` }, [
+          h("line", { x1: pad.left, x2: width - pad.right, y1: y(tick.value), y2: y(tick.value), className: "grid-line" }),
+          h("text", { x: pad.left - 10, y: y(tick.value) + 4, textAnchor: "end", className: "axis-label" }, compactTwd(tick.value)),
+        ]),
+      ),
+      ...xTicks.map((age) =>
+        h("text", { key: `x-${age}`, x: x(age), y: height - 12, textAnchor: "middle", className: "axis-label" }, `${Math.round(age)}歲`),
+      ),
+      ...projections.map((projection) =>
+        h("path", {
+          key: projection.key,
+          d: path(projection.drawdownSeries || []),
+          fill: "none",
+          stroke: colors[projection.key],
+          strokeWidth: projection.key === "base" ? 4 : 3,
+          strokeLinecap: "round",
+          strokeLinejoin: "round",
+        }),
+      ),
+    ]),
+    h("div", { className: "chart-legend", key: "legend" }, projections.map((projection) =>
+      h("span", { key: projection.key }, [
+        h("i", { style: { backgroundColor: colors[projection.key] } }),
+        `${projection.label}：${projection.assetLastsUntilAge >= 119 ? "120歲+" : `${projection.assetLastsUntilAge.toFixed(1)}歲`}`,
+      ]),
+    )),
+  ]);
+}
+
+function compactTwd(value) {
+  if (value >= 100000000) return `${(value / 100000000).toFixed(1)}億`;
+  if (value >= 10000) return `${Math.round(value / 10000)}萬`;
+  return number.format(value);
 }
 
 function CashflowView({ portfolio, baseProjection, cashflow, cash }) {

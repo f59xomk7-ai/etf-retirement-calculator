@@ -54,34 +54,45 @@ export function getPortfolio(holdings, quotes = {}) {
   };
 }
 
-export function futureValue({ principal, monthlyContribution, annualReturn, years }) {
+export function futureValue({ principal, monthlyContribution, annualReturn, years, contributionMonths = null }) {
   const months = Math.max(0, Math.round(years * 12));
   const monthlyRate = annualReturn / 12;
+  const activeContributionMonths = contributionMonths ?? months;
   let value = Math.max(0, principal);
   for (let month = 0; month < months; month += 1) {
-    value = value * (1 + monthlyRate) + Math.max(0, monthlyContribution);
+    value = value * (1 + monthlyRate) + (month < activeContributionMonths ? Math.max(0, monthlyContribution) : 0);
   }
   return value;
 }
 
 export function projectRetirement({ portfolioValue, cash, monthlyContribution, inputs, weightedReturn }) {
-  const yearsToRetirement = Math.max(0, toNumber(inputs.retirementAge) - toNumber(inputs.currentAge));
+  const currentAge = toNumber(inputs.currentAge);
+  const retirementAge = toNumber(inputs.retirementAge);
+  const contributionStopAge = Math.min(retirementAge, Math.max(currentAge, toNumber(inputs.contributionStopAge, retirementAge)));
+  const yearsToRetirement = Math.max(0, retirementAge - currentAge);
+  const contributionMonths = Math.max(0, Math.round((contributionStopAge - currentAge) * 12));
   const inflationRate = Math.max(0, toNumber(inputs.inflationRate));
   const inflatedExpense = toNumber(inputs.monthlyRetirementExpense) * (1 + inflationRate) ** yearsToRetirement;
   const startingAssets = Math.max(0, portfolioValue) + Math.max(0, toNumber(cash));
+  const baseAnnualReturn = Number.isFinite(toNumber(inputs.annualReturn, NaN))
+    ? toNumber(inputs.annualReturn)
+    : weightedReturn;
+  const targetWithdrawalRate = Math.max(0, toNumber(inputs.withdrawalRate, 0.04));
 
   return SCENARIOS.map((scenario) => {
-    const annualReturn = Math.max(-0.08, weightedReturn + scenario.returnAdjustment);
+    const annualReturn = Math.max(-0.08, baseAnnualReturn + scenario.returnAdjustment);
     const retirementPortfolioValue = futureValue({
       principal: startingAssets,
       monthlyContribution,
       annualReturn,
       years: yearsToRetirement,
+      contributionMonths,
     });
     const annualNeed = inflatedExpense * 12;
     const withdrawalRate = retirementPortfolioValue > 0 ? annualNeed / retirementPortfolioValue : Infinity;
+    const safeMonthlyWithdrawal = (retirementPortfolioValue * targetWithdrawalRate) / 12;
     const assetLastsUntilAge = estimateAssetLastsUntilAge({
-      retirementAge: toNumber(inputs.retirementAge),
+      retirementAge,
       assets: retirementPortfolioValue,
       monthlyExpense: inflatedExpense,
       annualReturn,
@@ -94,7 +105,16 @@ export function projectRetirement({ portfolioValue, cash, monthlyContribution, i
       retirementPortfolioValue,
       monthlyExpenseAtRetirement: inflatedExpense,
       withdrawalRate,
+      targetWithdrawalRate,
+      safeMonthlyWithdrawal,
       assetLastsUntilAge,
+      drawdownSeries: generateDrawdownSeries({
+        retirementAge,
+        assets: retirementPortfolioValue,
+        monthlyExpense: inflatedExpense,
+        annualReturn,
+        inflationRate,
+      }),
     };
   });
 }
@@ -114,6 +134,26 @@ export function estimateAssetLastsUntilAge({ retirementAge, assets, monthlyExpen
     }
   }
   return 120;
+}
+
+export function generateDrawdownSeries({ retirementAge, assets, monthlyExpense, annualReturn, inflationRate }) {
+  let balance = Math.max(0, assets);
+  let expense = Math.max(0, monthlyExpense);
+  const monthlyReturn = annualReturn / 12;
+  const monthlyInflation = inflationRate / 12;
+  const points = [{ age: retirementAge, balance }];
+  const maxMonths = 70 * 12;
+
+  for (let month = 1; month <= maxMonths; month += 1) {
+    balance = Math.max(0, balance * (1 + monthlyReturn) - expense);
+    expense *= 1 + monthlyInflation;
+    if (month % 12 === 0 || balance === 0) {
+      points.push({ age: retirementAge + month / 12, balance });
+    }
+    if (balance === 0) break;
+  }
+
+  return points;
 }
 
 export function getRetirementCashflow(portfolioRows, monthlyExpense) {
@@ -154,6 +194,9 @@ export function validateState(state) {
   if (toNumber(state.retirementInputs.currentAge) < 1) errors.push("目前年齡需大於 0。");
   if (toNumber(state.retirementInputs.retirementAge) <= toNumber(state.retirementInputs.currentAge)) {
     errors.push("目標退休年齡需大於目前年齡。");
+  }
+  if (toNumber(state.retirementInputs.contributionStopAge) < toNumber(state.retirementInputs.currentAge)) {
+    errors.push("停止投入年齡不可小於目前年齡。");
   }
   if (toNumber(state.retirementInputs.monthlyRetirementExpense) <= 0) {
     errors.push("退休後每月支出需大於 0。");

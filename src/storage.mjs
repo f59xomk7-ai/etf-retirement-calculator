@@ -11,7 +11,10 @@ export const defaultState = {
   retirementInputs: {
     currentAge: 32,
     retirementAge: 55,
+    contributionStopAge: 55,
     monthlyRetirementExpense: 45000,
+    annualReturn: 0.06,
+    withdrawalRate: 0.04,
     inflationRate: 0.02,
   },
 };
@@ -20,7 +23,15 @@ export function loadAppState() {
   try {
     const raw = localStorage.getItem(APP_KEY);
     if (!raw) return defaultState;
-    return { ...defaultState, ...JSON.parse(raw) };
+    const parsed = JSON.parse(raw);
+    return {
+      ...defaultState,
+      ...parsed,
+      retirementInputs: {
+        ...defaultState.retirementInputs,
+        ...(parsed.retirementInputs || {}),
+      },
+    };
   } catch {
     return defaultState;
   }

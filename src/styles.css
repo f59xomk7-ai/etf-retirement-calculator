@@ -269,10 +269,14 @@ h2 {
   gap: 12px;
 }
 
+.scenario-grid.compact {
+  margin-top: 14px;
+}
+
 .scenario-card {
   display: grid;
   gap: 8px;
-  min-height: 210px;
+  min-height: 180px;
   padding: 18px;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -299,6 +303,59 @@ h2 {
   color: #6d4711;
   font-weight: 700;
   font-size: 0.78rem;
+}
+
+.chart-wrap {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.chart-wrap svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: white;
+}
+
+.chart-bg {
+  fill: #fffefa;
+}
+
+.grid-line {
+  stroke: #e8dfd0;
+  stroke-width: 1;
+}
+
+.axis-label {
+  fill: var(--muted);
+  font-size: 12px;
+}
+
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.chart-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: white;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.chart-legend i {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
 }
 
 .month-grid {
